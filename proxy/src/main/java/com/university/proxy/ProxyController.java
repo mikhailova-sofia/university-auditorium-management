@@ -36,24 +36,32 @@ public class ProxyController {
         String backendEnv = System.getenv().getOrDefault("BACKEND_URL", backendUrlRaw);
         String frontendEnv = System.getenv().getOrDefault("FRONTEND_URL", frontendUrlRaw);
         
+        System.out.println("=================================================");
+        System.out.println("🔗 Backend URL (env): " + backendEnv);
+        System.out.println("🔗 Frontend URL (env): " + frontendEnv);
+        System.out.println("🔗 Backend URL (raw): " + backendUrlRaw);
+        System.out.println("🔗 Frontend URL (raw): " + frontendUrlRaw);
+        
         this.backendUrl = normalizeUrl(backendEnv);
         this.frontendUrl = normalizeUrl(frontendEnv);
         
-        System.out.println("=================================================");
-        System.out.println("🔗 Backend URL: " + this.backendUrl);
-        System.out.println("🔗 Frontend URL: " + this.frontendUrl);
+        System.out.println("🔗 Backend URL (normalized): " + this.backendUrl);
+        System.out.println("🔗 Frontend URL (normalized): " + this.frontendUrl);
         System.out.println("=================================================");
     }
 
     private String normalizeUrl(String url) {
         if (url == null || url.isEmpty()) {
-            return "http://localhost:3001";
+            return null;
         }
         
+        // Если URL уже содержит протокол, возвращаем как есть
         if (url.startsWith("http://") || url.startsWith("https://")) {
             return url;
         }
         
+        // Если URL не содержит протокол, добавляем https://
+        // Это нужно для Render.com, где property: url возвращает только хост
         return "https://" + url;
     }
 
