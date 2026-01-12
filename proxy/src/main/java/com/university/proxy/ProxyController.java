@@ -4,11 +4,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.Map;
 
@@ -39,42 +40,34 @@ public class ProxyController {
     }
 
     @RequestMapping(value = "/api/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.PATCH})
-    public Mono<ResponseEntity<Object>> proxyToBackend(
-            HttpServletRequest request,
-            @RequestBody(required = false) Object body) {
-        
-        String requestPath = request.getRequestURI();
-        String queryString = request.getQueryString();
+    public Mono<ResponseEntity<Object>> proxyToBackend(ServerHttpRequest request) {
+        String requestPath = request.getURI().getPath();
+        String queryString = request.getURI().getQuery();
+        HttpMethod method = request.getMethod();
         
         String backendPath = requestPath;
         if (requestPath.startsWith("/api")) {
             backendPath = requestPath;
         }
         
-        HttpMethod method = HttpMethod.valueOf(request.getMethod());
-        
-        WebClient.RequestBodySpec requestSpec = backendClient.method(method);
-        
+        String fullUri = backendPath;
         if (queryString != null && !queryString.isEmpty()) {
-            requestSpec.uri(uriBuilder -> uriBuilder
-                    .path(backendPath)
-                    .query(queryString)
-                    .build());
-        } else {
-            requestSpec.uri(backendPath);
+            fullUri = backendPath + "?" + queryString;
         }
         
+        WebClient.RequestBodySpec requestSpec = backendClient.method(method).uri(fullUri);
+        
         requestSpec.headers(headers -> {
-            request.getHeaderNames().asIterator().forEachRemaining(headerName -> {
-                String lowerName = headerName.toLowerCase();
+            request.getHeaders().forEach((name, values) -> {
+                String lowerName = name.toLowerCase();
                 if (!lowerName.equals("host") && !lowerName.equals("content-length")) {
-                    headers.add(headerName, request.getHeader(headerName));
+                    headers.addAll(name, values);
                 }
             });
         });
         
-        if (body != null && (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH)) {
-            requestSpec.bodyValue(body);
+        if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
+            requestSpec.body(BodyInserters.fromDataBuffers(request.getBody()));
         }
         
         return requestSpec
@@ -88,41 +81,34 @@ public class ProxyController {
     }
 
     @RequestMapping(value = {"/", "/**"}, method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.PATCH, RequestMethod.OPTIONS})
-    public Mono<ResponseEntity<Object>> proxyToFrontend(
-            HttpServletRequest request,
-            @RequestBody(required = false) Object body) {
-        
-        String requestPath = request.getRequestURI();
+    public Mono<ResponseEntity<Object>> proxyToFrontend(ServerHttpRequest request) {
+        String requestPath = request.getURI().getPath();
         
         if (requestPath.startsWith("/api") || requestPath.equals("/health")) {
             return Mono.empty();
         }
         
-        String queryString = request.getQueryString();
-        HttpMethod method = HttpMethod.valueOf(request.getMethod());
+        String queryString = request.getURI().getQuery();
+        HttpMethod method = request.getMethod();
         
-        WebClient.RequestBodySpec requestSpec = frontendClient.method(method);
-        
+        String fullUri = requestPath;
         if (queryString != null && !queryString.isEmpty()) {
-            requestSpec.uri(uriBuilder -> uriBuilder
-                    .path(requestPath)
-                    .query(queryString)
-                    .build());
-        } else {
-            requestSpec.uri(requestPath);
+            fullUri = requestPath + "?" + queryString;
         }
         
+        WebClient.RequestBodySpec requestSpec = frontendClient.method(method).uri(fullUri);
+        
         requestSpec.headers(headers -> {
-            request.getHeaderNames().asIterator().forEachRemaining(headerName -> {
-                String lowerName = headerName.toLowerCase();
+            request.getHeaders().forEach((name, values) -> {
+                String lowerName = name.toLowerCase();
                 if (!lowerName.equals("host") && !lowerName.equals("content-length")) {
-                    headers.add(headerName, request.getHeader(headerName));
+                    headers.addAll(name, values);
                 }
             });
         });
         
-        if (body != null && (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH)) {
-            requestSpec.bodyValue(body);
+        if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
+            requestSpec.body(BodyInserters.fromDataBuffers(request.getBody()));
         }
         
         return requestSpec
@@ -136,8 +122,7 @@ public class ProxyController {
     }
 
     @GetMapping("/health")
-    public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Proxy is healthy");
+    public Mono<ResponseEntity<String>> health() {
+        return Mono.just(ResponseEntity.ok("Proxy is healthy"));
     }
 }
-
