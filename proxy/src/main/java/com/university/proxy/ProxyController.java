@@ -55,13 +55,21 @@ public class ProxyController {
             return null;
         }
         
-        // Если URL уже содержит протокол, возвращаем как есть
+        // Если URL уже содержит протокол, проверяем, есть ли домен
         if (url.startsWith("http://") || url.startsWith("https://")) {
+            // Если это только имя сервиса без .onrender.com, добавляем домен
+            if (!url.contains(".") && !url.contains("localhost")) {
+                return url + ".onrender.com";
+            }
             return url;
         }
         
         // Если URL не содержит протокол, добавляем https://
-        // Это нужно для Render.com, где property: url возвращает только хост
+        // Если это только имя сервиса, добавляем .onrender.com
+        if (!url.contains(".") && !url.contains("localhost")) {
+            return "https://" + url + ".onrender.com";
+        }
+        
         return "https://" + url;
     }
 
