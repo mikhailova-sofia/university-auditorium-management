@@ -90,8 +90,9 @@ public class ProxyController {
     public Mono<ResponseEntity<Object>> proxyToFrontend(ServerHttpRequest request) {
         String requestPath = request.getURI().getPath();
         
+        // Пропускаем /api и /health - они обрабатываются другими методами
         if (requestPath.startsWith("/api") || requestPath.equals("/health")) {
-            return null;
+            return Mono.error(new RuntimeException("Should not reach here"));
         }
         
         String queryString = request.getURI().getQuery();
