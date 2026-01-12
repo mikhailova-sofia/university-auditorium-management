@@ -12,7 +12,6 @@ services:
       - key: DB_PATH
         value: /app/data/auditoriums.db
     healthCheckPath: /health
-    plan: starter
 
   - type: web
     name: university-frontend
@@ -29,7 +28,6 @@ services:
           property: host
           suffix: /api
     healthCheckPath: /
-    plan: starter
 
   - type: web
     name: university-proxy
@@ -50,5 +48,4 @@ services:
           name: university-frontend
           property: host
     healthCheckPath: /health
-    plan: starter
 
