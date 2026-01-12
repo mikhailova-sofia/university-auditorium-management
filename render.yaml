@@ -38,6 +38,8 @@ services:
     dockerContext: ./proxy
     plan: free
     envVars:
+      - key: PORT
+        value: 8080
       - key: SPRING_PROFILES_ACTIVE
         value: prod
       - key: BACKEND_URL
