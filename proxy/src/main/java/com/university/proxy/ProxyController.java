@@ -66,18 +66,24 @@ public class ProxyController {
             });
         });
         
+        Mono<ResponseEntity<Object>> response;
         if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
-            requestSpec.body(BodyInserters.fromDataBuffers(request.getBody()));
+            response = requestSpec
+                    .body(BodyInserters.fromDataBuffers(request.getBody()))
+                    .retrieve()
+                    .toEntity(Object.class)
+                    .timeout(Duration.ofSeconds(30));
+        } else {
+            response = requestSpec
+                    .retrieve()
+                    .toEntity(Object.class)
+                    .timeout(Duration.ofSeconds(30));
         }
         
-        return requestSpec
-                .retrieve()
-                .toEntity(Object.class)
-                .timeout(Duration.ofSeconds(30))
-                .onErrorResume(error -> {
-                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Error proxying request: " + error.getMessage())));
-                });
+        return response.onErrorResume(error -> {
+            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error proxying request: " + error.getMessage())));
+        });
     }
 
     @RequestMapping(value = {"/", "/**"}, method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.PATCH, RequestMethod.OPTIONS})
@@ -85,7 +91,7 @@ public class ProxyController {
         String requestPath = request.getURI().getPath();
         
         if (requestPath.startsWith("/api") || requestPath.equals("/health")) {
-            return Mono.empty();
+            return null;
         }
         
         String queryString = request.getURI().getQuery();
@@ -107,18 +113,24 @@ public class ProxyController {
             });
         });
         
+        Mono<ResponseEntity<Object>> response;
         if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
-            requestSpec.body(BodyInserters.fromDataBuffers(request.getBody()));
+            response = requestSpec
+                    .body(BodyInserters.fromDataBuffers(request.getBody()))
+                    .retrieve()
+                    .toEntity(Object.class)
+                    .timeout(Duration.ofSeconds(30));
+        } else {
+            response = requestSpec
+                    .retrieve()
+                    .toEntity(Object.class)
+                    .timeout(Duration.ofSeconds(30));
         }
         
-        return requestSpec
-                .retrieve()
-                .toEntity(Object.class)
-                .timeout(Duration.ofSeconds(30))
-                .onErrorResume(error -> {
-                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                            .body(Map.of("error", "Error proxying request: " + error.getMessage())));
-                });
+        return response.onErrorResume(error -> {
+            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Error proxying request: " + error.getMessage())));
+        });
     }
 
     @GetMapping("/health")
