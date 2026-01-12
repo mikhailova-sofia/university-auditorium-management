@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: university-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DB_PATH
+        value: /app/data/auditoriums.db
+    healthCheckPath: /health
+    plan: starter
+
+  - type: web
+    name: university-frontend
+    env: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: university-proxy
+          property: host
+          suffix: /api
+    healthCheckPath: /
+    plan: starter
+
+  - type: web
+    name: university-proxy
+    env: docker
+    dockerfilePath: ./proxy/Dockerfile
+    dockerContext: ./proxy
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: BACKEND_URL
+        fromService:
+          type: web
+          name: university-backend
+          property: host
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: university-frontend
+          property: host
+    healthCheckPath: /health
+    plan: starter
+

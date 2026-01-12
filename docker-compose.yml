@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # Node.js API Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: university-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_PATH=/app/data/auditoriums.db
+    volumes:
+      - backend-data:/app/data
+    restart: unless-stopped
+    networks:
+      - university-network
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: university-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://proxy:8080/api
+    depends_on:
+      - backend
+      - proxy
+    restart: unless-stopped
+    networks:
+      - university-network
+
+  # Spring Boot Reverse Proxy
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    container_name: university-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - BACKEND_URL=http://backend:3001
+      - FRONTEND_URL=http://frontend:3000
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - university-network
+
+volumes:
+  backend-data:
+
+networks:
+  university-network:
+    driver: bridge
+
