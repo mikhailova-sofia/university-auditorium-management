@@ -1,141 +1,224 @@
 package com.university.proxy;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
-import java.time.Duration;
+import java.util.Enumeration;
 import java.util.Map;
 
 @RestController
 @CrossOrigin(origins = "*")
 public class ProxyController {
 
-    private final WebClient backendClient;
-    private final WebClient frontendClient;
+    @Value("${backend.url:http://localhost:3001}")
+    private String backendUrlRaw;
 
-    @Value("${backend.url:http://backend:3001}")
+    @Value("${frontend.url:http://localhost:3000}")
+    private String frontendUrlRaw;
+
     private String backendUrl;
-
-    @Value("${frontend.url:http://frontend:3000}")
     private String frontendUrl;
+    private final RestTemplate restTemplate;
 
     public ProxyController() {
-        String backend = System.getenv().getOrDefault("BACKEND_URL", "http://backend:3001");
-        String frontend = System.getenv().getOrDefault("FRONTEND_URL", "http://frontend:3000");
-        
-        this.backendClient = WebClient.builder()
-                .baseUrl(backend)
-                .build();
-        
-        this.frontendClient = WebClient.builder()
-                .baseUrl(frontend)
-                .build();
+        this.restTemplate = new RestTemplate();
     }
 
-    @RequestMapping(value = "/api/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.PATCH})
-    public Mono<ResponseEntity<Object>> proxyToBackend(ServerHttpRequest request) {
-        String requestPath = request.getURI().getPath();
-        String queryString = request.getURI().getQuery();
-        HttpMethod method = request.getMethod();
+    @PostConstruct
+    public void init() {
+        String backendEnv = System.getenv().getOrDefault("BACKEND_URL", backendUrlRaw);
+        String frontendEnv = System.getenv().getOrDefault("FRONTEND_URL", frontendUrlRaw);
         
-        String backendPath = requestPath;
-        if (requestPath.startsWith("/api")) {
-            backendPath = requestPath;
-        }
+        this.backendUrl = normalizeUrl(backendEnv);
+        this.frontendUrl = normalizeUrl(frontendEnv);
         
-        String fullUri = backendPath;
-        if (queryString != null && !queryString.isEmpty()) {
-            fullUri = backendPath + "?" + queryString;
-        }
-        
-        WebClient.RequestBodySpec requestSpec = backendClient.method(method).uri(fullUri);
-        
-        requestSpec.headers(headers -> {
-            request.getHeaders().forEach((name, values) -> {
-                String lowerName = name.toLowerCase();
-                if (!lowerName.equals("host") && !lowerName.equals("content-length")) {
-                    headers.addAll(name, values);
-                }
-            });
-        });
-        
-        Mono<ResponseEntity<Object>> response;
-        if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
-            response = requestSpec
-                    .body(BodyInserters.fromDataBuffers(request.getBody()))
-                    .retrieve()
-                    .toEntity(Object.class)
-                    .timeout(Duration.ofSeconds(30));
-        } else {
-            response = requestSpec
-                    .retrieve()
-                    .toEntity(Object.class)
-                    .timeout(Duration.ofSeconds(30));
-        }
-        
-        return response.onErrorResume(error -> {
-            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Error proxying request: " + error.getMessage())));
-        });
+        System.out.println("=================================================");
+        System.out.println("🔗 Backend URL: " + this.backendUrl);
+        System.out.println("🔗 Frontend URL: " + this.frontendUrl);
+        System.out.println("=================================================");
     }
 
-    @RequestMapping(value = {"/", "/**"}, method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.PATCH, RequestMethod.OPTIONS})
-    public Mono<ResponseEntity<Object>> proxyToFrontend(ServerHttpRequest request) {
-        String requestPath = request.getURI().getPath();
+    private String normalizeUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            return "http://localhost:3001";
+        }
         
-        // Пропускаем /api и /health - они обрабатываются другими методами
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+        
+        return "https://" + url;
+    }
+
+    @RequestMapping(value = "/api/**")
+    public ResponseEntity<byte[]> proxyToBackend(
+            HttpServletRequest request,
+            @RequestBody(required = false) byte[] body) {
+        
+        try {
+            String targetUrl = buildTargetUrl(request, backendUrl);
+            System.out.println("📡 Проксирование к Backend: " + request.getMethod() + " " + targetUrl);
+            
+            HttpHeaders headers = copyHeaders(request);
+            HttpEntity<byte[]> entity = new HttpEntity<>(body, headers);
+            HttpMethod method = HttpMethod.valueOf(request.getMethod());
+            
+            ResponseEntity<byte[]> response = restTemplate.exchange(
+                    targetUrl,
+                    method,
+                    entity,
+                    byte[].class
+            );
+            
+            return ResponseEntity
+                    .status(response.getStatusCode())
+                    .headers(filterResponseHeaders(response.getHeaders()))
+                    .body(response.getBody());
+                    
+        } catch (HttpClientErrorException | HttpServerErrorException e) {
+            System.err.println("❌ HTTP ошибка: " + e.getStatusCode() + " - " + e.getStatusText());
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorJson = "{\"error\":\"" + e.getStatusText() + "\"}";
+            return ResponseEntity
+                    .status(e.getStatusCode())
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
+                    
+        } catch (ResourceAccessException e) {
+            System.err.println("❌ Ошибка подключения к Backend: " + e.getMessage());
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorJson = "{\"error\":\"Сервис временно недоступен. Backend сервер не отвечает.\"}";
+            return ResponseEntity
+                    .status(HttpStatus.BAD_GATEWAY)
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
+                    
+        } catch (Exception e) {
+            System.err.println("❌ Ошибка проксирования: " + e.getMessage());
+            e.printStackTrace();
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorMessage = e.getMessage() != null ? e.getMessage().replace("\"", "\\\"") : "Неизвестная ошибка";
+            String errorJson = "{\"error\":\"Ошибка сервера: " + errorMessage + "\"}";
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
+        }
+    }
+
+    @RequestMapping(value = {"/", "/**"})
+    public ResponseEntity<byte[]> proxyToFrontend(
+            HttpServletRequest request,
+            @RequestBody(required = false) byte[] body) {
+        
+        String requestPath = request.getRequestURI();
+        
         if (requestPath.startsWith("/api") || requestPath.equals("/health")) {
-            return Mono.error(new RuntimeException("Should not reach here"));
+            return null;
         }
         
-        String queryString = request.getURI().getQuery();
-        HttpMethod method = request.getMethod();
-        
-        String fullUri = requestPath;
-        if (queryString != null && !queryString.isEmpty()) {
-            fullUri = requestPath + "?" + queryString;
+        try {
+            String targetUrl = buildTargetUrl(request, frontendUrl);
+            System.out.println("📡 Проксирование к Frontend: " + request.getMethod() + " " + targetUrl);
+            
+            HttpHeaders headers = copyHeaders(request);
+            HttpEntity<byte[]> entity = new HttpEntity<>(body, headers);
+            HttpMethod method = HttpMethod.valueOf(request.getMethod());
+            
+            ResponseEntity<byte[]> response = restTemplate.exchange(
+                    targetUrl,
+                    method,
+                    entity,
+                    byte[].class
+            );
+            
+            return ResponseEntity
+                    .status(response.getStatusCode())
+                    .headers(filterResponseHeaders(response.getHeaders()))
+                    .body(response.getBody());
+                    
+        } catch (HttpClientErrorException | HttpServerErrorException e) {
+            System.err.println("❌ HTTP ошибка: " + e.getStatusCode() + " - " + e.getStatusText());
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorJson = "{\"error\":\"" + e.getStatusText() + "\"}";
+            return ResponseEntity
+                    .status(e.getStatusCode())
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
+                    
+        } catch (ResourceAccessException e) {
+            System.err.println("❌ Ошибка подключения к Frontend: " + e.getMessage());
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorJson = "{\"error\":\"Сервис временно недоступен. Frontend сервер не отвечает.\"}";
+            return ResponseEntity
+                    .status(HttpStatus.BAD_GATEWAY)
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
+                    
+        } catch (Exception e) {
+            System.err.println("❌ Ошибка проксирования: " + e.getMessage());
+            e.printStackTrace();
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String errorMessage = e.getMessage() != null ? e.getMessage().replace("\"", "\\\"") : "Неизвестная ошибка";
+            String errorJson = "{\"error\":\"Ошибка сервера: " + errorMessage + "\"}";
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .headers(responseHeaders)
+                    .body(errorJson.getBytes());
         }
-        
-        WebClient.RequestBodySpec requestSpec = frontendClient.method(method).uri(fullUri);
-        
-        requestSpec.headers(headers -> {
-            request.getHeaders().forEach((name, values) -> {
-                String lowerName = name.toLowerCase();
-                if (!lowerName.equals("host") && !lowerName.equals("content-length")) {
-                    headers.addAll(name, values);
-                }
-            });
-        });
-        
-        Mono<ResponseEntity<Object>> response;
-        if (method == HttpMethod.POST || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
-            response = requestSpec
-                    .body(BodyInserters.fromDataBuffers(request.getBody()))
-                    .retrieve()
-                    .toEntity(Object.class)
-                    .timeout(Duration.ofSeconds(30));
-        } else {
-            response = requestSpec
-                    .retrieve()
-                    .toEntity(Object.class)
-                    .timeout(Duration.ofSeconds(30));
-        }
-        
-        return response.onErrorResume(error -> {
-            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Error proxying request: " + error.getMessage())));
-        });
     }
 
     @GetMapping("/health")
-    public Mono<ResponseEntity<String>> health() {
-        return Mono.just(ResponseEntity.ok("Proxy is healthy"));
+    public ResponseEntity<String> health() {
+        return ResponseEntity.ok("Proxy is healthy");
+    }
+
+    private String buildTargetUrl(HttpServletRequest request, String baseUrl) {
+        StringBuilder url = new StringBuilder(baseUrl);
+        url.append(request.getRequestURI());
+        
+        if (request.getQueryString() != null) {
+            url.append("?").append(request.getQueryString());
+        }
+        
+        return url.toString();
+    }
+
+    private HttpHeaders copyHeaders(HttpServletRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        Enumeration<String> headerNames = request.getHeaderNames();
+        
+        while (headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            if (!headerName.equalsIgnoreCase("host") &&
+                !headerName.equalsIgnoreCase("content-length")) {
+                headers.add(headerName, request.getHeader(headerName));
+            }
+        }
+        
+        return headers;
+    }
+
+    private HttpHeaders filterResponseHeaders(HttpHeaders headers) {
+        HttpHeaders filtered = new HttpHeaders();
+        headers.forEach((name, values) -> {
+            if (!name.equalsIgnoreCase("transfer-encoding")) {
+                filtered.addAll(name, values);
+            }
+        });
+        return filtered;
     }
 }

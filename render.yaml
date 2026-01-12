@@ -46,11 +46,11 @@ services:
         fromService:
           type: web
           name: university-backend
-          property: host
+          property: url
       - key: FRONTEND_URL
         fromService:
           type: web
           name: university-frontend
-          property: host
-    healthCheckPath: /health
+          property: url
+    healthCheckPath: /actuator/health
 
